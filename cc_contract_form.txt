@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CC Iron Works Custom Fabrication Contract</title>
+
+<script src="https://cdn.jsdelivr.net/npm/signature_pad@4.1.3/dist/signature_pad.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+<style>
+body {font-family: Arial, sans-serif; margin:20px; color:#111;}
+h2 {border-bottom:2px solid #333; padding-bottom:5px;}
+.section {margin-top:25px; border:1px solid #ccc; padding:15px; border-radius:6px; background:#fafafa;}
+.row {display:flex; gap:20px;}
+.row div {flex:1;}
+input, textarea {width:100%; padding:8px; margin-top:5px; margin-bottom:15px; border:1px solid #777; border-radius:4px;}
+.required::after {content:" *"; color:red;}
+.logo {width:100%; max-width:1100px; display:block; margin:auto; margin-bottom:10px;}
+.employee-only {display:none; background:#f1f1f1; padding:8px; border-radius:4px; margin-bottom:10px;}
+button {padding:14px 20px; font-size:16px; background:#222; color:white; border:none; border-radius:6px; cursor:pointer;}
+button:hover {background:#444;}
+canvas {border:1px solid #777; border-radius:4px;}
+.disclosure {background:#fff3cd; padding:10px; border-left:4px solid #ffeeba; margin-bottom:20px;}
+.checkbox-label {display:inline-block; position:relative; padding-left:30px; margin-right:15px; cursor:pointer; font-size:14px; user-select:none;}
+.checkbox-label input[type="checkbox"] {position:absolute; opacity:0; cursor:pointer;}
+.checkbox-label span {position:absolute; top:0; left:0; height:20px; width:20px; border:1px solid #777; border-radius:50%; background-color:#fff;}
+.checkbox-label input:checked ~ span {background-color:#222; border-color:#222;}
+.checkbox-label span:after {content:""; position:absolute; display:none;}
+.checkbox-label input:checked ~ span:after {display:block; top:4px; left:4px; width:12px; height:12px; border-radius:50%; background:white;}
+#freightCostContainer, #changeOrdersSection, #otherOrderContainer {display:none; margin-top:15px;}
+</style>
+
+<script>
+let signaturePad;
+
+window.addEventListener("load", () => {
+  const canvas = document.getElementById("customerSignature");
+  canvas.width = canvas.offsetWidth;
+  canvas.height = 220;
+  signaturePad = new SignaturePad(canvas,{penColor:"black"});
+  generateJobNumber();
+});
+
+// Generate job number
+function generateJobNumber(){
+  const year = new Date().getFullYear();
+  const random = Math.floor(1000 + Math.random()*9000);
+  document.getElementById("jobNumber").value = "CCIW-"+year+"-"+random;
+}
+
+// Employee mode toggle
+function toggleEmployeeMode(){
+  const fields = document.querySelectorAll(".employee-only");
+  const button = document.getElementById("employeeToggleBtn");
+
+  if(fields[0].style.display === "none" || fields[0].style.display === ""){
+    const password = prompt("Enter password for Employee Mode:");
+    if(password === "usmc0331"){
+      fields.forEach(el=>el.style.display="block");
+      button.textContent="Customer Mode";
+    } else {
+      alert("Incorrect password.");
+    }
+  } else {
+    fields.forEach(el=>el.style.display="none");
+    button.textContent="Employee Mode";
+  }
+}
+
+// Only one checkbox per group
+function selectOnlyThis(id, group){
+  document.getElementsByName(group).forEach(cb=>{ if(cb.id!==id) cb.checked=false; });
+  if(group==="deliveryMethod") toggleFreight();
+  if(group==="orderType"){ toggleChangeOrders(); toggleOther(); }
+}
+
+// Toggle sections
+function toggleFreight(){
+  const shipping = document.getElementById("shippingCheckbox");
+  document.getElementById("freightCostContainer").style.display = shipping.checked ? "block" : "none";
+}
+function toggleChangeOrders(){
+  const change = document.getElementById("orderChange");
+  document.getElementById("changeOrdersSection").style.display = change.checked ? "block" : "none";
+}
+function toggleOther(){
+  const other = document.getElementById("other");
+  const container = document.getElementById("otherOrderContainer");
+  const input = document.getElementById("otherOrderInput");
+  if(other.checked){ container.style.display="block"; input.required=true; }
+  else { container.style.display="none"; input.required=false; input.value=""; }
+}
+
+// Clear signature
+function clearSignature(){ signaturePad.clear(); }
+
+// Format phone
+function formatPhone(input){
+  let numbers = input.value.replace(/\D/g,'');
+  if(numbers.length>10) numbers=numbers.slice(0,10);
+  if(numbers.length>6) input.value=numbers.slice(0,3)+"-"+numbers.slice(3,6)+"-"+numbers.slice(6);
+  else if(numbers.length>3) input.value=numbers.slice(0,3)+"-"+numbers.slice(3);
+  else input.value=numbers;
+}
+
+// Validate numbers
+function validateNumberInput(evt){
+  const char = String.fromCharCode(evt.which);
+  if(!/[0-9.]/.test(char)) evt.preventDefault();
+}
+
+// Validate form before PDF
+function validateForm(){
+  const requiredFields = document.querySelectorAll("input[required],textarea[required]");
+  for(let f of requiredFields){
+    if(!f.value.trim()){ alert("Please fill all required fields."); return false; }
+  }
+
+  if(!document.getElementById("pickup").checked &&
+     !document.getElementById("localDelivery").checked &&
+     !document.getElementById("shippingCheckbox").checked){
+       alert("Please select a Delivery Method."); return false;
+  }
+
+  if(!document.getElementById("newOrder").checked &&
+     !document.getElementById("orderChange").checked &&
+     !document.getElementById("repair").checked &&
+     !document.getElementById("other").checked){
+       alert("Please select an Order Type."); return false;
+  }
+
+  if(signaturePad.isEmpty()){ alert("Please sign the contract."); return false; }
+
+  const customer = document.getElementById("customerName").value.trim().toLowerCase();
+  const printed = document.getElementById("printedName").value.trim().toLowerCase();
+  if(customer !== printed){
+    alert("Printed Name under signature must match Customer Name.");
+    return false;
+  }
+
+  return true;
+}
+
+// PDF generation
+function generatePDF(){
+  if(!validateForm()) return;
+
+  const original = document.getElementById("contractForm");
+  const clone = original.cloneNode(true);
+  clone.querySelectorAll("input,textarea").forEach(input=>{
+    const span = document.createElement("span");
+    if(input.type==="checkbox") span.textContent = input.checked?"Yes":"No";
+    else span.textContent = input.value;
+    input.replaceWith(span);
+  });
+
+  // Signature
+  const sigCanvas = clone.querySelector("#customerSignature");
+  const sigImg = document.createElement("img");
+  sigImg.src = signaturePad.toDataURL();
+  sigImg.style.width="100%";
+  sigImg.style.height="220px";
+  if(sigCanvas) sigCanvas.replaceWith(sigImg);
+
+  ["freightCostContainer","changeOrdersSection","otherOrderContainer"].forEach(id=>{
+    const el = clone.querySelector("#"+id);
+    if(el) el.style.display="block";
+  });
+
+  const jobNumber = document.getElementById("jobNumber").value;
+  const customerName = document.getElementById("customerName").value.trim().replace(/\s+/g,'_') || "Customer";
+
+  html2pdf().set({
+    margin:0.5,
+    filename: jobNumber+"_"+customerName+"_Contract.pdf",
+    image:{type:'jpeg', quality:0.98},
+    html2canvas:{scale:2},
+    jsPDF:{unit:'in', format:'letter', orientation:'portrait'}
+  }).from(clone).save();
+}
+</script>
+</head>
+
+<body>
+<div id="contractForm">
+<img src="https://static.wixstatic.com/media/7bdf3f_caf236e4bec94f53b08f22d9f11b9618~mv2.png" class="logo">
+<div style="text-align:center">
+<h1>CC Iron Works LLC</h1>
+<p>CNC Machining • Fabricating • Welding</p>
+<p>10613 Main Street, New Middletown, Ohio 44442</p>
+<p>Phone: (330) 542-0500 | Cell: (330) 402-4030 | BobCCIronworks@comcast.net</p>
+</div>
+
+<button type="button" id="employeeToggleBtn" onclick="toggleEmployeeMode()">Employee Mode</button>
+
+<h2>Custom Fabrication Agreement</h2>
+<div class="disclosure">
+<strong>Disclosure:</strong> All custom fabrication jobs require a deposit and will have a build/fabrication time period depending on the size of the job.
+</div>
+
+<div class="section">
+<h3>Job / Contract Number</h3>
+<input type="text" id="jobNumber" readonly>
+</div>
+
+<div class="section">
+<h3>Customer Information</h3>
+<label class="required">Customer Name</label>
+<input type="text" id="customerName" required>
+<label>Company</label><input type="text">
+<div class="row">
+<div>
+<label class="required">Phone</label>
+<input type="tel" required placeholder="000-000-0000" oninput="formatPhone(this)">
+</div>
+<div>
+<label class="required">Email</label><input type="email" required>
+</div>
+</div>
+<label class="required">Billing Address</label><textarea required></textarea>
+<label class="required">Installation / Delivery Address</label><textarea required></textarea>
+<label class="required">Contract Date</label><input type="date" required>
+</div>
+
+<div class="section">
+<h3>Project Information</h3>
+<label class="required">Project Description</label><textarea required></textarea>
+<label class="required">Specifications / Materials / Measurements</label><textarea required></textarea>
+<label class="required">Approved Drawings (.jpg, .jpeg, .png, .svg, .dxf)</label>
+<input type="file" id="approvedFile" accept=".jpg,.jpeg,.png,.svg,.dxf" multiple>
+<div>
+<label class="checkbox-label">Yes
+<input type="checkbox" name="approvedDrawings" id="approvedYes"><span></span>
+</label>
+<label class="checkbox-label">No
+<input type="checkbox" name="approvedDrawings" id="approvedNo"><span></span>
+</label>
+</div>
+</div>
+
+<div class="section">
+<h3>Pricing</h3>
+<label class="required">Total Project Price ($)</label>
+<input type="text" id="projectPrice" required onkeypress="validateNumberInput(event)">
+<div class="employee-only">
+<label>Deposit Percentage (%)</label>
+<input type="text" id="depositPercent" value="50" onkeypress="validateNumberInput(event)">
+<label>Deposit Required ($)</label><input type="text" id="depositAmount" readonly>
+<label>Sales Tax (7.5%)</label><input type="text" id="salesTax" readonly>
+<label>Total With Tax ($)</label><input type="text" id="totalWithTax" readonly>
+<label>Remaining Balance Due ($)</label><input type="text" id="remainingBalance" readonly>
+</div>
+</div>
+
+<div class="section">
+<h3>Schedule</h3>
+<label class="required">Estimated Start Date</label><input type="date" id="startDate" required>
+<label class="required">Estimated Completion Date</label><input type="date" id="completionDate" required>
+</div>
+
+<div class="section">
+<h3>Delivery Method <span class="required">*</span></h3>
+<label class="checkbox-label">Customer Pickup
+<input type="checkbox" name="deliveryMethod" id="pickup" onclick="selectOnlyThis(this.id,'deliveryMethod')"><span></span>
+</label>
+<label class="checkbox-label">Local Delivery
+<input type="checkbox" name="deliveryMethod" id="localDelivery" onclick="selectOnlyThis(this.id,'deliveryMethod')"><span></span>
+</label>
+<label class="checkbox-label">Shipping
+<input type="checkbox" name="deliveryMethod" id="shippingCheckbox" onclick="selectOnlyThis(this.id,'deliveryMethod'); toggleFreight()"><span></span>
+</label>
+<div id="freightCostContainer" class="employee-only">
+<label>Freight Shipping Delivery Cost ($)</label><input type="text" onkeypress="validateNumberInput(event)">
+</div>
+</div>
+
+<div class="section">
+<h3>Order Type <span class="required">*</span></h3>
+<label class="checkbox-label">New Order
+<input type="checkbox" name="orderType" id="newOrder" onclick="selectOnlyThis(this.id,'orderType')"><span></span>
+</label>
+<label class="checkbox-label">Order Change
+<input type="checkbox" name="orderType" id="orderChange" onclick="selectOnlyThis(this.id,'orderType'); toggleChangeOrders()"><span></span>
+</label>
+<label class="checkbox-label">Repair / Modification
+<input type="checkbox" name="orderType" id="repair" onclick="selectOnlyThis(this.id,'orderType')"><span></span>
+</label>
+<label class="checkbox-label">Other
+<input type="checkbox" name="orderType" id="other" onclick="selectOnlyThis(this.id,'orderType'); toggleOther()"><span></span>
+</label>
+</div>
+
+<div class="section" id="changeOrdersSection">
+<h3>Change Orders</h3>
+<label>Change Description</label><textarea></textarea>
+<label>Additional Cost</label><input type="text" onkeypress="validateNumberInput(event)">
+</div>
+
+<div class="section" id="otherOrderContainer">
+<label class="required">Please specify "Other"</label>
+<input type="text" id="otherOrderInput">
+</div>
+
+<div class="section">
+<h3>Signature <span class="required">*</span></h3>
+
+<div class="disclosure" style="margin-top:15px;">
+<strong>By signing this contract:</strong> You acknowledge that you have reviewed all project details, specifications, and pricing. Any changes to the job after signing may result in additional charges.
+</div>
+
+<canvas id="customerSignature" style="width:100%; height:220px;"></canvas>
+<button type="button" onclick="clearSignature()">Clear Signature</button>
+<label class="required">Printed Name</label>
+<input type="text" id="printedName" required>
+<label class="required">Date</label><input type="date" required>
+</div>
+
+</div>
+
+<br>
+<button onclick="generatePDF()">Download Contract PDF</button>
+</body>
+</html>
